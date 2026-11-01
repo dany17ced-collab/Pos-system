@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel de administrador</title>
+<style>
+:root{--bg:#1C1D21;--card:#232429;--line:#32343b;--tx:#F2F2F4;--mut:#9A9CA6;--rosa:#FF2E63;--azul:#3EC1FF;--ambar:#FFC93E;--verde:#3EFFB0;--rojo:#FF4D5E}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,Segoe UI,Roboto,sans-serif}
+header{display:flex;gap:12px;align-items:center;padding:12px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+header h1{font-size:18px;margin:0;flex:1}
+main{max-width:1000px;margin:0 auto;padding:16px 20px 60px}
+button,input,select{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+button{cursor:pointer}button.p{background:var(--rosa);border-color:var(--rosa);font-weight:600}
+button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--azul);outline-offset:2px}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:4px 0 12px}
+.chip{white-space:nowrap;border-radius:99px}.chip.on{background:var(--azul);color:#06222e;border-color:var(--azul);font-weight:600}
+.tabs{display:flex;gap:6px;margin:6px 0 14px;border-bottom:1px solid var(--line)}
+.tab{background:none;border:0;border-bottom:3px solid transparent;border-radius:0;padding:10px 14px;color:var(--mut)}
+.tab.on{color:var(--tx);border-color:var(--rosa);font-weight:600}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+.card b{display:block;font-size:26px;margin-top:4px}.mut{color:var(--mut)}
+table{width:100%;border-collapse:collapse}td,th{padding:9px 8px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--mut);font-weight:500}td.r,th.r{text-align:right}
+details.card{margin-bottom:10px}summary{cursor:pointer;display:flex;justify-content:space-between;gap:10px;font-weight:600}
+.sz{display:inline-block;min-width:74px;margin:4px 6px 0 0;padding:6px 10px;border-radius:10px;background:#2c2e35;text-align:center}
+.s3{background:#5a4a12}.s1{background:#6a3410}.s0{background:#6a1a22}.sn{background:#8a0f1c}
+.sw{width:26px;height:26px;border-radius:50%;border:2px solid #fff3;display:inline-block;vertical-align:middle}
+.row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.row span.n{flex:1;min-width:120px}
+#login{max-width:340px;margin:12vh auto;display:grid;gap:10px;padding:0 20px}
+.err{color:var(--rojo)}.ok{color:var(--verde)}.hide{display:none}
+.x{overflow-x:auto}
+</style>
+</head>
+<body>
+<section id="login">
+  <h1>Panel de administrador</h1>
+  <input id="em" type="email" placeholder="Correo" autocomplete="username">
+  <input id="pw" type="password" placeholder="Clave" autocomplete="current-password">
+  <button class="p" id="go">Entrar</button>
+  <div id="msg" class="err"></div>
+</section>
+<div id="app" class="hide">
+  <header><h1 id="who">Panel</h1><span class="mut" id="upd"></span><button id="out">Salir</button></header>
+  <main>
+    <div class="chips" id="stores"></div>
+    <nav class="tabs" id="tabs"></nav>
+    <div id="view"></div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+// Pega aquí los datos de tu proyecto (Supabase → Project Settings → API). Solo la clave "anon", nunca la service_role.
+const SUPABASE_URL = "https://TU-PROYECTO.supabase.co";
+const SUPABASE_ANON_KEY = "PEGA-AQUI-LA-CLAVE-ANON";
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money = n => "S/ " + Number(n || 0).toLocaleString("es-PE", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const claveColor = c => String(c || "").trim().toLowerCase();
+const S = {stores: [], store: "all", tab: "resumen", org: null, date: new Date().toLocaleDateString("sv")};
+const TABS = [["resumen", "Resumen"], ["ventas", "Ventas"], ["stock", "Stock"], ["productos", "Productos y precios"], ["entradas", "Entradas y salidas"], ["almacen", "Almacén"], ["reportes", "Reportes"], ["cortes", "Cortes de caja"], ["descuentos", "Descuentos"], ["clientes", "Clientes"], ["vendedores", "Vendedores"], ["colores", "Colores"]];
+
+async function all(table, cols, f) {
+  let out = [], i = 0;
+  for (;;) {
+    let q = sb.from(table).select(cols);
+    if (f) q = f(q);
+    const {data, error} = await q.range(i, i + 999);
+    if (error) throw error;
+    out = out.concat(data);
+    if (data.length < 1000) return out;
+    i += 1000;
+  }
+}
+const byStore = q => S.store === "all" ? q : q.eq("store_id", S.store);
+const storeName = id => (S.stores.find(s => s.id === id) || {}).name || "—";
+
+async function entrar() {
+  $("msg").textContent = "";
+  const {data, error} = await sb.auth.signInWithPassword({email: $("em").value.trim(), password: $("pw").value});
+  if (error) { $("msg").textContent = "Correo o clave incorrectos."; return; }
+  const {data: p, error: e2} = await sb.from("user_profiles").select("role,org_id,display_name").eq("id", data.user.id).single();
+  if (e2 || !p || p.role !== "admin") {
+    await sb.auth.signOut();
+    $("msg").textContent = "Esta cuenta no es de administrador.";
+    return;
+  }
+  S.org = p.org_id;
+  $("who").textContent = "Panel de " + (p.display_name || "administrador");
+  $("login").classList.add("hide"); $("app").classList.remove("hide");
+  const {data: st} = await sb.from("stores").select("id,name,active").order("name");
+  S.stores = (st || []).filter(s => s.active);
+  pintarBase(); render();
+}
+
+function pintarBase() {
+  $("stores").innerHTML = [["all", "Todas"], ...S.stores.map(s => [s.id, s.name])]
+    .map(([id, n]) => `<button class="chip ${S.store === id ? "on" : ""}" data-s="${esc(id)}">${esc(n)}</button>`).join("");
+  $("tabs").innerHTML = TABS.map(([k, n]) => `<button class="tab ${S.tab === k ? "on" : ""}" data-t="${k}">${n}</button>`).join("");
+}
+
+async function render() {
+  const v = $("view");
+  try {
+    if (S.tab === "resumen") await vResumen(v);
+    else if (S.tab === "ventas") await vVentas(v);
+    else if (S.tab === "stock") await vStock(v);
+    else if (S.tab === "entradas") await vEntradas(v);
+    else if (S.tab === "almacen") await vAlmacen(v);
+    else if (S.tab === "reportes") await vReportes(v);
+    else if (S.tab === "cortes") await vCortes(v);
+    else if (S.tab === "descuentos") await vDescuentos(v);
+    else if (S.tab === "productos") await vProductos(v);
+    else if (S.tab === "clientes") await vClientes(v);
+    else if (S.tab === "vendedores") await vVendedores(v);
+    else await vColores(v);
+    $("upd").textContent = "Actualizado " + new Date().toLocaleTimeString("es-PE", {hour: "2-digit", minute: "2-digit"});
+  } catch (e) { v.innerHTML = `<p class="err">No se pudo cargar: ${esc(e.message || e)}</p>`; }
+}
+
+async function vResumen(v) {
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const ventas = (await all("sales", "store_id,total,status,sold_at,cashier_auth_id", byStore)).filter(s => s.status === "COMPLETADA");
+  const deHoy = ventas.filter(s => new Date(s.sold_at) >= hoy);
+  const prods = (await all("products", "id,stock,base_product_id,active,deleted", byStore)).filter(p => p.active && !p.deleted);
+  const padres = new Set(prods.filter(p => p.base_product_id).map(p => p.base_product_id));
+  const bajo = prods.filter(p => !padres.has(p.id) && p.stock <= 3).length;
+  const suma = a => a.reduce((t, s) => t + Number(s.total), 0);
+  const c = (t, n) => `<div class="card"><span class="mut">${t}</span><b>${n}</b></div>`;
+  v.innerHTML = `<div class="grid">${c("Ventas de hoy", money(suma(deHoy)))}${c("Transacciones de hoy", deHoy.length)}
+    ${c("Ventas totales", money(suma(ventas)))}${c("Productos con stock bajo", bajo)}
+    ${c("Vendedores con ventas hoy", new Set(deHoy.map(s => s.cashier_auth_id).filter(Boolean)).size)}</div>`;
+}
+
+async function vVentas(v) {
+  v.innerHTML = `<p><input type="date" id="fd" value="${S.date}"></p><div id="vl">Cargando…</div>`;
+  $("fd").onchange = e => { S.date = e.target.value; render(); };
+  const ini = new Date(S.date + "T00:00:00"), fin = new Date(ini.getTime() + 864e5);
+  const rows = await all("sales", "folio,store_id,sold_at,total,payment_method,receipt_type,status,origin",
+    q => byStore(q).gte("sold_at", ini.toISOString()).lt("sold_at", fin.toISOString()).order("sold_at", {ascending: false}));
+  const ok = rows.filter(r => r.status === "COMPLETADA");
+  $("vl").innerHTML = `<p class="mut">${ok.length} ventas · ${money(ok.reduce((t, r) => t + Number(r.total), 0))}</p>` +
+    (rows.length ? `<div class="x"><table><tr><th>Hora</th><th>Tienda</th><th>Comprobante</th><th>Pago</th><th class="r">Total</th></tr>` +
+    rows.map(r => `<tr><td>${new Date(r.sold_at).toLocaleTimeString("es-PE", {hour: "2-digit", minute: "2-digit"})}</td>
+      <td>${esc(storeName(r.store_id))}${r.origin === "ALMACEN" ? " (almacén)" : ""}</td>
+      <td>${esc(r.receipt_type)} ${r.folio ?? ""}${r.status === "ANULADA" ? ' <span class="err">anulada</span>' : ""}</td>
+      <td>${esc(r.payment_method)}</td><td class="r">${money(r.total)}</td></tr>`).join("") + "</table></div>"
+    : "<p class='mut'>No hay ventas ese día.</p>");
+}
+
+let stockQ = "";
+async function vStock(v) {
+  const [prods, pal] = await Promise.all([
+    all("products", "id,name,size,color_name,stock,base_product_id,active,deleted", byStore),
+    all("color_palette", "name_key,hex")]);
+  const hex = Object.fromEntries(pal.map(p => [p.name_key, p.hex]));
+  const vivos = prods.filter(p => p.active && !p.deleted);
+  const hijos = {}; vivos.filter(p => p.base_product_id).forEach(p => (hijos[p.base_product_id] ||= []).push(p));
+  const items = vivos.filter(p => !p.base_product_id).map(p => ({p, h: hijos[p.id] || []}))
+    .filter(x => x.p.name.toLowerCase().includes(stockQ.toLowerCase())).sort((a, b) => a.p.name.localeCompare(b.p.name));
+  const cls = n => n < 0 ? "sn" : n === 0 ? "s0" : n === 1 ? "s1" : n <= 3 ? "s3" : "";
+  v.innerHTML = `<p><input id="bq" placeholder="Buscar producto" value="${esc(stockQ)}" style="width:100%"></p>` + items.map(({p, h}) => {
+    if (!h.length) return `<div class="card" style="margin-bottom:10px"><b style="font-size:16px">${esc(p.name)}</b> <span class="sz ${cls(p.stock)}">${p.stock} u.</span></div>`;
+    const colores = {}; h.forEach(x => (colores[x.color_name || "Sin color"] ||= []).push(x));
+    const total = h.reduce((t, x) => t + x.stock, 0);
+    return `<details class="card"><summary><span>${esc(p.name)}</span><span>${total} u.</span></summary>` +
+      Object.entries(colores).map(([c, xs]) => {
+        const hx = /^#[0-9A-Fa-f]{6}$/.test(hex[claveColor(c)] || "") ? hex[claveColor(c)] : "#888";
+        return `<div class="row"><span class="sw" style="background:${hx}"></span><span class="n">${esc(c)}</span></div><div>` +
+          xs.sort((a, b) => String(a.size).localeCompare(String(b.size), "es", {numeric: true}))
+            .map(x => `<span class="sz ${cls(x.stock)}">${esc(x.size || "—")}: ${x.stock}</span>`).join("") + "</div>";
+      }).join("") + "</details>";
+  }).join("") || "<p class='mut'>Sin productos.</p>";
+  const b = $("bq"); b.oninput = e => { stockQ = e.target.value; vStock(v); setTimeout(() => { const n = $("bq"); n.focus(); n.setSelectionRange(99, 99); }); };
+}
+
+const ESTILOS = [["liso","Liso",1,1],["bicolor","Bicolor",2,3],["diagonal","Diagonal",2,3],["rayas","Rayas playero",2,4],["rayasv","Rayas verticales",2,4],["rayasf","Rayas finas",2,3],["ajedrez","Ajedrez",2,3],["cuadros","Cuadros",2,3],["lunares","Lunares",2,3],["manchas","Dálmata",2,3],["jaspeado","Jaspeado",2,4],["degradado","Degradado",2,4],["sectores","Multicolor",2,6],["tiedye","Tie-dye",2,5],["camuflaje","Camuflaje",3,5],["leopardo","Animal print",2,3]];
+const parseColor = h => { h = String(h || ""); const i = h.indexOf(":"); return i < 0 ? {e: "liso", c: [h || "#888888"]} : {e: h.slice(0, i), c: h.slice(i + 1).split(",")}; };
+const fondoColor = h => { const {e, c} = parseColor(h); if (e === "liso" || c.length < 2) return c[0]; const n = c.length;
+  return e === "degradado" ? `linear-gradient(135deg,${c.join(",")})` : `linear-gradient(${e === "rayasv" ? 90 : 45}deg,${c.map((x, k) => `${x} ${k * 100 / n}% ${(k + 1) * 100 / n}%`).join(",")})`; };
+const inputsColor = c => c.map(x => `<input type="color" value="${x}" style="padding:2px;width:42px">`).join("");
+function valorFila(row) {
+  const e = row.querySelector("select").value, c = [...row.querySelectorAll("input[type=color]")].map(i => i.value.toUpperCase());
+  return e === "liso" ? c[0] : e + ":" + c.join(",");
+}
+function ajustarFila(row) {
+  const [, , mn, mx] = ESTILOS.find(x => x[0] === row.querySelector("select").value), box = row.querySelector(".cols");
+  let ins = box.querySelectorAll("input"); const base = ins.length ? ins[ins.length - 1].value : "#888888";
+  while (box.querySelectorAll("input").length < mn) box.insertAdjacentHTML("beforeend", inputsColor([base]));
+  while (box.querySelectorAll("input").length > mx) box.lastElementChild.remove();
+  row.querySelector(".sw").style.background = fondoColor(valorFila(row));
+}
+async function vColores(v) {
+  const [prods, pal] = await Promise.all([all("products", "color_name", null), all("color_palette", "name_key,hex")]);
+  const hex = Object.fromEntries(pal.map(p => [p.name_key, p.hex]));
+  const nombres = [...new Set(prods.map(p => String(p.color_name || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  v.innerHTML = `<p class="mut">Elige el estilo y los colores de cada nombre. Se ve igual en todos los teléfonos. La vista previa de aquí es aproximada; en la app se dibuja el estampado completo.</p>` +
+    nombres.map(n => { const k = claveColor(n), h = hex[k], q = parseColor(h);
+      return `<div class="row" data-k="${esc(k)}"><span class="sw" style="background:${fondoColor(h || "#888888")}"></span><span class="n">${esc(n)}${h ? "" : ' <span class="mut">(automático)</span>'}</span>
+      <select data-est="1">${ESTILOS.map(x => `<option value="${x[0]}" ${x[0] === q.e ? "selected" : ""}>${x[1]}</option>`).join("")}</select>
+      <span class="cols">${inputsColor(q.c)}</span><button class="p" data-save="${esc(k)}">Guardar</button>${h ? `<button data-del="${esc(k)}">Quitar</button>` : ""}</div>`; }).join("") || "<p class='mut'>Aún no hay colores.</p>";
+}
+
+let entQ = "";
+async function vEntradas(v) {
+  const prods = (await all("products", "id,store_id,name,size,color_name,stock,base_product_id,active,deleted", byStore)).filter(p => p.active && !p.deleted);
+  const padre = Object.fromEntries(prods.map(p => [p.id, p])), conHijos = new Set(prods.map(p => p.base_product_id).filter(Boolean));
+  const nom = p => p.base_product_id && padre[p.base_product_id] ? padre[p.base_product_id].name : p.name;
+  const q = entQ.toLowerCase();
+  const lista = prods.filter(p => p.base_product_id || !conHijos.has(p.id))
+    .filter(p => !q || `${nom(p)} ${p.color_name || ""} ${p.size || ""}`.toLowerCase().includes(q)).slice(0, 25);
+  v.innerHTML = `<p class="mut">Busca la prenda y registra una entrada, salida o ajuste. Entrada suma, salida resta y en ajuste escribes la cantidad con su signo (por ejemplo -2).</p>
+    <p><input id="eq" placeholder="Buscar producto, color o talla" value="${esc(entQ)}" style="width:100%"></p>` +
+    lista.map(p => `<div class="row" data-store="${esc(p.store_id)}"><span class="n">${esc(nom(p))} · ${esc(p.color_name || "sin color")} · ${esc(p.size || "—")}
+      <span class="mut">(${esc(storeName(p.store_id))}, stock ${p.stock})</span></span>
+      <select><option value="ENTRADA">Entrada</option><option value="SALIDA">Salida</option><option value="AJUSTE">Ajuste</option></select>
+      <input type="number" step="1" placeholder="Cantidad" style="width:100px"><input type="text" placeholder="Motivo (opcional)" style="width:170px">
+      <button class="p" data-reg="${esc(p.id)}">Registrar</button></div>`).join("") + (lista.length ? "" : "<p class='mut'>Sin resultados.</p>");
+  $("eq").oninput = e => { entQ = e.target.value; vEntradas(v); setTimeout(() => { const n = $("eq"); n.focus(); n.setSelectionRange(99, 99); }); };
+}
+
+async function vAlmacen(v) {
+  const rows = (await all("warehouse_stock", "product_name,sku,size,color_name,color_hex,quantity,deleted", null)).filter(r => !r.deleted);
+  const g = {}; rows.forEach(r => (g[r.product_name] ||= []).push(r));
+  v.innerHTML = `<p class="mut">Stock central del almacén (solo lectura por ahora).</p>` + (Object.entries(g).sort(([a], [b]) => a.localeCompare(b)).map(([n, xs]) =>
+    `<details class="card"><summary><span>${esc(n)}</span><span>${xs.reduce((t, x) => t + x.quantity, 0)} u.</span></summary>` +
+    xs.map(x => `<span class="sz ${x.quantity < 0 ? "sn" : x.quantity === 0 ? "s0" : x.quantity <= 3 ? "s3" : ""}"><span class="sw" style="width:12px;height:12px;background:${/^#[0-9A-Fa-f]{6}$/.test(x.color_hex || "") ? x.color_hex : "#888"}"></span> ${esc(x.color_name || "")} ${esc(x.size || "")}: ${x.quantity}</span>`).join("") + "</details>").join("") || "<p class='mut'>El almacén está vacío.</p>");
+}
+
+const R = {d: new Date(Date.now() - 6 * 864e5).toLocaleDateString("sv"), h: new Date().toLocaleDateString("sv")};
+async function vReportes(v) {
+  v.innerHTML = `<p>Del <input type="date" id="rd" value="${R.d}"> al <input type="date" id="rh" value="${R.h}"> <button id="rb">Ver</button> <button id="rc">Descargar Excel (CSV)</button></p><div id="ro">Cargando…</div>`;
+  const ini = new Date(R.d + "T00:00:00"), fin = new Date(new Date(R.h + "T00:00:00").getTime() + 864e5);
+  const rows = (await all("sales", "folio,store_id,sold_at,total,discount,payment_method,receipt_type,status,origin",
+    q => byStore(q).gte("sold_at", ini.toISOString()).lt("sold_at", fin.toISOString()).order("sold_at")));
+  const ok = rows.filter(x => x.status === "COMPLETADA"), sum = a => a.reduce((t, x) => t + Number(x.total), 0);
+  const agr = f => { const m = {}; ok.forEach(x => { const k = f(x); (m[k] ||= {n: 0, t: 0}).n++; m[k].t += Number(x.total); }); return Object.entries(m); };
+  const tabla = (tit, e) => `<h3>${tit}</h3><div class="x"><table>${e.map(([k, a]) => `<tr><td>${esc(k)}</td><td class="r">${a.n} ventas</td><td class="r">${money(a.t)}</td></tr>`).join("")}</table></div>`;
+  $("ro").innerHTML = `<div class="grid"><div class="card"><span class="mut">Ventas</span><b>${money(sum(ok))}</b></div><div class="card"><span class="mut">Transacciones</span><b>${ok.length}</b></div>
+    <div class="card"><span class="mut">Anuladas</span><b>${rows.length - ok.length}</b></div></div>` +
+    tabla("Por forma de pago", agr(x => x.payment_method)) + tabla("Por tienda", agr(x => storeName(x.store_id))) + tabla("Por día", agr(x => new Date(x.sold_at).toLocaleDateString("sv")));
+  $("rb").onclick = () => { R.d = $("rd").value; R.h = $("rh").value; render(); };
+  $("rc").onclick = () => {
+    const f = x => `"${String(x ?? "").replace(/"/g, '""')}"`;
+    const csv = "\ufeffFecha,Tienda,Comprobante,Folio,Pago,Descuento,Total,Estado\n" + rows.map(x => [new Date(x.sold_at).toLocaleString("es-PE"), storeName(x.store_id), x.receipt_type, x.folio, x.payment_method, x.discount, x.total, x.status].map(f).join(",")).join("\n");
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv"})); a.download = `ventas_${R.d}_a_${R.h}.csv`; a.click();
+  };
+}
+
+async function vCortes(v) {
+  const rows = await all("cash_cuts", "store_id,cut_type,cut_at,transaction_count,total_sales,total_cash,expected_cash,counted_cash,difference", q => byStore(q).order("cut_at", {ascending: false}));
+  v.innerHTML = rows.length ? `<div class="x"><table><tr><th>Fecha</th><th>Tienda</th><th>Tipo</th><th class="r">Ventas</th><th class="r">Esperado</th><th class="r">Contado</th><th class="r">Diferencia</th></tr>` +
+    rows.slice(0, 200).map(c => `<tr><td>${new Date(c.cut_at).toLocaleString("es-PE", {dateStyle: "short", timeStyle: "short"})}</td><td>${esc(storeName(c.store_id))}</td><td>${esc(c.cut_type)}</td>
+    <td class="r">${money(c.total_sales)}</td><td class="r">${money(c.expected_cash)}</td><td class="r">${c.counted_cash == null ? "—" : money(c.counted_cash)}</td>
+    <td class="r ${Number(c.difference) < 0 ? "err" : ""}">${c.difference == null ? "—" : money(c.difference)}</td></tr>`).join("") + "</table></div>" : "<p class='mut'>Aún no hay cortes de caja.</p>";
+}
+
+async function vDescuentos(v) {
+  const rows = (await all("discounts", "id,name,promo_code,value_type,value,deleted", null)).filter(d => !d.deleted);
+  v.innerHTML = `<p class="mut">Los vendedores eligen entre estos descuentos al cobrar.</p><div class="card row" id="nd"><input id="dn" placeholder="Nombre" style="flex:1"><select id="dt"><option value="PORCENTAJE">Porcentaje</option><option value="FIJO">Monto fijo</option></select>
+    <input id="dv" type="number" step="0.01" placeholder="Valor" style="width:100px"><input id="dc" placeholder="Código (opcional)" style="width:150px"><button class="p" id="da">Crear descuento</button></div>` +
+    rows.map(d => `<div class="row"><span class="n">${esc(d.name)} <span class="mut">${esc(d.promo_code || "")}</span></span><span>${d.value_type === "PORCENTAJE" ? d.value + " %" : money(d.value)}</span><button data-dd="${esc(d.id)}">Eliminar</button></div>`).join("");
+  $("da").onclick = async () => {
+    const name = $("dn").value.trim(), val = parseFloat($("dv").value);
+    if (!name || !(val > 0)) { alert("Escribe nombre y un valor mayor que 0."); return; }
+    const {error} = await sb.from("discounts").insert({id: crypto.randomUUID(), name, value_type: $("dt").value, value: val, promo_code: $("dc").value.trim() || null});
+    if (error) alert("No se pudo crear: " + error.message); else render();
+  };
+}
+
+let prodQ = "";
+async function vProductos(v) {
+  const prods = (await all("products", "id,store_id,sku,name,size,color_name,purchase_price,photo_url,base_product_id,active,deleted", byStore)).filter(p => p.active && !p.deleted);
+  const tb = {}; (await all("price_tiers", "id,product_id,min_quantity,label,unit_price,deleted", null)).filter(t => !t.deleted).forEach(t => (tb[t.product_id] ||= []).push(t));
+  const hijos = {}; prods.filter(p => p.base_product_id).forEach(p => (hijos[p.base_product_id] ||= []).push(p));
+  const lista = prods.filter(p => !p.base_product_id && p.name.toLowerCase().includes(prodQ.toLowerCase())).sort((a, b) => a.name.localeCompare(b.name)).slice(0, 20);
+  const tiers = p => (tb[p.id] || []).sort((a, b) => a.min_quantity - b.min_quantity).map(t => `<span class="sz">${esc(t.label)} (${t.min_quantity}+) S/ <input type="number" step="0.01" value="${t.unit_price}" style="width:80px;padding:4px"> <button data-pt="${esc(t.id)}">Guardar</button></span>`).join("");
+  v.innerHTML = `<details class="card" style="margin-bottom:12px"><summary>Nuevo producto</summary><p class="mut">Elige una tienda arriba. Si escribes tallas y colores (separados por coma) se crean todas las combinaciones con el mismo precio.</p>
+    <div class="row"><input id="ns" placeholder="Código (SKU)" style="width:130px"><input id="nn" placeholder="Nombre" style="flex:1"><input id="nc" type="number" step="0.01" placeholder="Costo" style="width:90px"><input id="nu" type="number" step="0.01" placeholder="Precio unidad" style="width:120px"></div>
+    <div class="row"><input id="nt" placeholder="Tallas: 2, 4, 6" style="flex:1"><input id="nk" placeholder="Colores: Rojo, Azul" style="flex:1"><button class="p" id="np">Crear producto</button></div></details>
+    <p><input id="pq" placeholder="Buscar producto" value="${esc(prodQ)}" style="width:100%"></p>` +
+    lista.map(p => `<details class="card"><summary><span>${esc(p.name)}</span><span class="mut">${esc(storeName(p.store_id))}</span></summary>
+      <div class="row">${/^https?:/.test(p.photo_url || "") ? `<img src="${esc(p.photo_url)}" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:10px">` : ""}<input type="file" accept="image/*" data-foto="${esc(p.id)}" style="max-width:230px"></div>
+      <div class="row"><input value="${esc(p.name)}" style="flex:1"><input type="number" step="0.01" value="${p.purchase_price}" style="width:100px" title="Costo"><button data-pn="${esc(p.id)}">Guardar nombre y costo</button></div>
+      ${tiers(p)}${(hijos[p.id] || []).map(h => `<div class="row"><span class="n">${esc(h.color_name || "")} ${esc(h.size || "")}</span></div>${tiers(h)}`).join("")}</details>`).join("");
+  $("pq").oninput = e => { prodQ = e.target.value; vProductos(v); setTimeout(() => { const n = $("pq"); n.focus(); n.setSelectionRange(99, 99); }); };
+  $("np").onclick = async () => {
+    if (S.store === "all") { alert("Elige primero una tienda arriba."); return; }
+    const sku = $("ns").value.trim(), name = $("nn").value.trim(), costo = parseFloat($("nc").value) || 0, precio = parseFloat($("nu").value);
+    if (!sku || !name || !(precio >= 0)) { alert("Escribe código, nombre y precio."); return; }
+    const lst = x => $(x).value.split(",").map(a => a.trim()).filter(Boolean), tallas = lst("nt"), colores = lst("nk");
+    const base = {store_id: S.store, purchase_price: costo, sale_price: precio, stock: 0, active: true, deleted: false};
+    const padreId = crypto.randomUUID(), filas = [{...base, id: padreId, sku, name}];
+    if (tallas.length || colores.length) for (const c of (colores.length ? colores : [""])) for (const t of (tallas.length ? tallas : [""]))
+      filas.push({...base, id: crypto.randomUUID(), sku: [sku, c, t].filter(Boolean).join("-").replace(/\s+/g, "").toUpperCase(), name, base_product_id: padreId, color_name: c || null, size: t || null, variant_name: [c, t].filter(Boolean).join(" ")});
+    const hojas = filas.length > 1 ? filas.slice(1) : filas;
+    let e1 = (await sb.from("products").insert(filas.slice(0, 1))).error;
+    if (!e1 && filas.length > 1) e1 = (await sb.from("products").insert(filas.slice(1))).error;
+    if (!e1) e1 = (await sb.from("price_tiers").insert(hojas.map(h => ({id: crypto.randomUUID(), product_id: h.id, min_quantity: 1, label: "Unidad", unit_price: precio})))).error;
+    if (e1) alert("No se pudo crear: " + e1.message); else { alert("Producto creado. Registra su stock en Entradas y salidas."); render(); }
+  };
+}
+
+async function vClientes(v) {
+  const rows = (await all("customers", "id,name,phone,email,address,deleted", null)).filter(c => !c.deleted).sort((a, b) => a.name.localeCompare(b.name));
+  v.innerHTML = `<div class="card row"><input id="cn" placeholder="Nombre" style="flex:1"><input id="cp" placeholder="Teléfono" style="width:130px"><input id="ce" placeholder="Correo" style="width:170px"><input id="ca" placeholder="Dirección" style="width:170px"><button class="p" id="cg">Agregar cliente</button></div>` +
+    rows.map(c => `<div class="row"><span class="n">${esc(c.name)} <span class="mut">${esc([c.phone, c.email, c.address].filter(Boolean).join(" · "))}</span></span><button data-dc="${esc(c.id)}">Eliminar</button></div>`).join("");
+  $("cg").onclick = async () => {
+    const name = $("cn").value.trim(); if (!name) { alert("Escribe el nombre."); return; }
+    const {error} = await sb.from("customers").insert({id: crypto.randomUUID(), name, phone: $("cp").value.trim() || null, email: $("ce").value.trim() || null, address: $("ca").value.trim() || null});
+    if (error) alert("No se pudo guardar: " + error.message); else render();
+  };
+}
+
+async function fnVend(body) {
+  const {data: {session}} = await sb.auth.getSession();
+  const r = await fetch(SUPABASE_URL + "/functions/v1/clever-action", {method: "POST", headers: {"Content-Type": "application/json", Authorization: "Bearer " + session.access_token, apikey: SUPABASE_ANON_KEY}, body: JSON.stringify(body)});
+  const j = await r.json(); if (!r.ok || j.error) throw new Error(j.error || "Error " + r.status); return j;
+}
+async function vVendedores(v) {
+  const {cuentas} = await fnVend({accion: "listar"});
+  v.innerHTML = `<p class="mut">Cuentas de vendedores en la nube. Crear vendedores y cambiar su PIN se hace en la app, porque el PIN se protege en el teléfono.</p>` +
+    (cuentas.map(c => `<div class="row"><span class="n">${esc(c.nombre || "Sin nombre")} <span class="mut">${esc(c.email || "")} ${c.activo ? "" : "· inactivo"}</span></span><button data-dv="${esc(c.auth_id)}">Quitar acceso</button></div>`).join("") || "<p class='mut'>No hay vendedores.</p>");
+}
+
+document.addEventListener("click", async e => {
+  const t = e.target;
+  if (t.dataset.s) { S.store = t.dataset.s; pintarBase(); render(); }
+  else if (t.dataset.t) { S.tab = t.dataset.t; pintarBase(); render(); }
+  else if (t.dataset.save) {
+    const k = t.dataset.save, hx = valorFila(t.parentElement);
+    const {error} = await sb.from("color_palette").upsert({id: `${S.org}:${k}`, name_key: k, hex: hx});
+    if (error) alert("No se pudo guardar: " + error.message); else render();
+  } else if (t.dataset.reg) {
+    const row = t.parentElement, id = t.dataset.reg, tipo = row.querySelector("select").value, n = parseInt(row.querySelector("input[type=number]").value, 10);
+    if (!n) { alert("Escribe una cantidad."); return; }
+    const delta = tipo === "ENTRADA" ? Math.abs(n) : tipo === "SALIDA" ? -Math.abs(n) : n, mid = crypto.randomUUID();
+    t.disabled = true;
+    const {data: after, error} = await sb.rpc("apply_stock_movements", {p_product_id: id, p_movements: [{id: mid, delta}]});
+    if (error) { alert("No se pudo registrar: " + error.message); t.disabled = false; return; }
+    const {error: e2} = await sb.from("inventory_movements").insert({id: mid, store_id: row.dataset.store, product_id: id, movement_type: tipo, quantity: Math.abs(delta),
+      stock_before: after - delta, stock_after: after, reason: row.querySelector("input[type=text]").value || "Registrado desde el panel web", moved_at: new Date().toISOString()});
+    alert("Stock actualizado: ahora hay " + after + (e2 ? ". Aviso: no se guardó la línea del historial (" + e2.message + ")." : "."));
+    render();
+  } else if (t.dataset.dd) {
+    if (!confirm("¿Eliminar este descuento?")) return;
+    const {error} = await sb.from("discounts").update({deleted: true}).eq("id", t.dataset.dd);
+    if (error) alert("No se pudo eliminar: " + error.message); else render();
+  } else if (t.dataset.pt) {
+    const val = parseFloat(t.parentElement.querySelector("input").value);
+    if (!(val >= 0)) { alert("Precio no válido."); return; }
+    const {error} = await sb.from("price_tiers").update({unit_price: val}).eq("id", t.dataset.pt);
+    alert(error ? "No se pudo guardar: " + error.message : "Precio guardado.");
+  } else if (t.dataset.pn) {
+    const i = t.parentElement.querySelectorAll("input"), nombre = i[0].value.trim(), costo = parseFloat(i[1].value) || 0;
+    if (!nombre) { alert("El nombre no puede quedar vacío."); return; }
+    const {error} = await sb.from("products").update({name: nombre, purchase_price: costo}).eq("id", t.dataset.pn);
+    alert(error ? "No se pudo guardar: " + error.message : "Guardado.");
+  } else if (t.dataset.dc) {
+    if (!confirm("¿Eliminar este cliente?")) return;
+    const {error} = await sb.from("customers").update({deleted: true}).eq("id", t.dataset.dc);
+    if (error) alert("No se pudo eliminar: " + error.message); else render();
+  } else if (t.dataset.dv) {
+    if (!confirm("¿Quitar el acceso de este vendedor a la nube?")) return;
+    try { await fnVend({accion: "eliminar_cuenta", auth_id: t.dataset.dv}); render(); } catch (err) { alert("No se pudo quitar: " + err.message); }
+  } else if (t.dataset.del) {
+    const {error} = await sb.from("color_palette").delete().eq("id", `${S.org}:${t.dataset.del}`);
+    if (error) alert("No se pudo quitar: " + error.message); else render();
+  }
+});
+document.addEventListener("change", async e => {
+  const t = e.target;
+  if (t.dataset.est) ajustarFila(t.closest(".row"));
+  else if (t.dataset.foto && t.files[0]) {
+    try {
+      const img = await createImageBitmap(t.files[0]), k = Math.min(1, 1200 / Math.max(img.width, img.height));
+      const cv = document.createElement("canvas"); cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+      cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+      const blob = await new Promise(ok => cv.toBlob(ok, "image/jpeg", 0.85)), ruta = `${S.org}/productos/${t.dataset.foto}-${Date.now()}.jpg`;
+      const up = await sb.storage.from("catalog-photos").upload(ruta, blob, {contentType: "image/jpeg"}); if (up.error) throw up.error;
+      const url = sb.storage.from("catalog-photos").getPublicUrl(ruta).data.publicUrl;
+      const {error} = await sb.from("products").update({photo_url: url}).eq("id", t.dataset.foto); if (error) throw error;
+      alert("Foto guardada. Los teléfonos que ya tenían una foto propia de este producto conservan la suya."); render();
+    } catch (err) { alert("No se pudo subir la foto: " + (err.message || err)); }
+  }
+});
+$("go").onclick = entrar; $("pw").onkeydown = e => { if (e.key === "Enter") entrar(); };
+$("out").onclick = async () => { await sb.auth.signOut(); location.reload(); };
+setInterval(() => { if (!$("app").classList.contains("hide") && (S.tab === "resumen" || S.tab === "ventas")) render(); }, 30000);
+</script>
+</body>
+</html>
