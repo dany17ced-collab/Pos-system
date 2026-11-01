@@ -57,6 +57,10 @@ input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;bac
 .sug{display:grid;grid-template-columns:repeat(12,1fr);gap:5px}.sug button{aspect-ratio:1;padding:0;border-radius:8px;border:1px solid #fff2;cursor:pointer}
 canvas[data-sw]{width:26px;height:26px;border-radius:50%;vertical-align:middle;border:2px solid #fff3}
 canvas[data-mini],#pv{border-radius:50%}h4{margin:14px 0 6px;font-weight:600}
+.sz{display:inline-flex;align-items:stretch;min-width:0;padding:0;overflow:hidden;margin:4px 8px 0 0;border-radius:12px;text-align:left;vertical-align:middle}
+.sz .t{display:flex;align-items:center;gap:6px;padding:8px 12px;background:#0003;font-weight:600;min-width:44px;justify-content:center}
+.sz .q{padding:6px 14px;font-size:20px;font-weight:700;line-height:1.3}.sz .q small{font-size:12px;font-weight:400;color:var(--mut);margin-left:3px}
+.tag{display:inline-flex;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -183,8 +187,8 @@ async function vStock(v) {
   const items = vivos.filter(p => !p.base_product_id).map(p => ({p, h: hijos[p.id] || []}))
     .filter(x => x.p.name.toLowerCase().includes(stockQ.toLowerCase())).sort((a, b) => a.p.name.localeCompare(b.p.name));
   const cls = n => n < 0 ? "sn" : n === 0 ? "s0" : n === 1 ? "s1" : n <= 3 ? "s3" : "";
-  v.innerHTML = `<p><input id="bq" placeholder="Buscar producto" value="${esc(stockQ)}" style="width:100%"></p>` + items.map(({p, h}) => {
-    if (!h.length) return `<div class="card" style="margin-bottom:10px"><b style="font-size:16px">${esc(p.name)}</b> <span class="sz ${cls(p.stock)}">${p.stock} u.</span></div>`;
+  v.innerHTML = `<p><input id="bq" placeholder="Buscar producto" value="${esc(stockQ)}" style="width:100%"></p><p class="mut">En cada recuadro, a la izquierda va la talla y a la derecha la cantidad de unidades.</p>` + items.map(({p, h}) => {
+    if (!h.length) return `<div class="card" style="margin-bottom:10px"><b style="font-size:16px">${esc(p.name)}</b> <span class="sz ${cls(p.stock)}"><span class="q" title="Cantidad">${p.stock}<small>u.</small></span></span></div>`;
     const colores = {}; h.forEach(x => (colores[x.color_name || "Sin color"] ||= []).push(x));
     const total = h.reduce((t, x) => t + x.stock, 0);
     return `<details class="card"><summary><span>${esc(p.name)}</span><span>${total} u.</span></summary>` +
@@ -192,7 +196,7 @@ async function vStock(v) {
         const hx = hex[claveColor(c)] || "#888888";
         return `<div class="row"><canvas width="26" height="26" data-sw="${esc(hx)}"></canvas><span class="n">${esc(c)}</span></div><div>` +
           xs.sort((a, b) => String(a.size).localeCompare(String(b.size), "es", {numeric: true}))
-            .map(x => `<span class="sz ${cls(x.stock)}">${esc(x.size || "—")}: ${x.stock}</span>`).join("") + "</div>";
+            .map(x => `<span class="sz ${cls(x.stock)}"><span class="t" title="Talla">${esc(x.size || "—")}</span><span class="q" title="Cantidad">${x.stock}<small>u.</small></span></span>`).join("") + "</div>";
       }).join("") + "</details>";
   }).join("") || "<p class='mut'>Sin productos.</p>";
   pintarSw(v);
@@ -316,8 +320,8 @@ async function vEntradas(v) {
     .filter(p => !q || `${nom(p)} ${p.color_name || ""} ${p.size || ""}`.toLowerCase().includes(q)).slice(0, 25);
   v.innerHTML = `<p class="mut">Busca la prenda y registra una entrada, salida o ajuste. Entrada suma, salida resta y en ajuste escribes la cantidad con su signo (por ejemplo -2).</p>
     <p><input id="eq" placeholder="Buscar producto, color o talla" value="${esc(entQ)}" style="width:100%"></p>` +
-    lista.map(p => `<div class="row" data-store="${esc(p.store_id)}"><span class="n">${esc(nom(p))} · ${esc(p.color_name || "sin color")} · ${esc(p.size || "—")}
-      <span class="mut">(${esc(storeName(p.store_id))}, stock ${p.stock})</span></span>
+    lista.map(p => `<div class="row" data-store="${esc(p.store_id)}"><span class="n">${esc(nom(p))} · ${esc(p.color_name || "sin color")}
+      <span class="sz"><span class="t" title="Talla">${esc(p.size || "—")}</span><span class="q" title="Stock actual">${p.stock}<small>u.</small></span></span> <span class="mut">${esc(storeName(p.store_id))}</span></span>
       <select><option value="ENTRADA">Entrada</option><option value="SALIDA">Salida</option><option value="AJUSTE">Ajuste</option></select>
       <input type="number" step="1" placeholder="Cantidad" style="width:100px"><input type="text" placeholder="Motivo (opcional)" style="width:170px">
       <button class="p" data-reg="${esc(p.id)}">Registrar</button></div>`).join("") + (lista.length ? "" : "<p class='mut'>Sin resultados.</p>");
@@ -329,7 +333,7 @@ async function vAlmacen(v) {
   const g = {}; rows.forEach(r => (g[r.product_name] ||= []).push(r));
   v.innerHTML = `<p class="mut">Stock central del almacén (solo lectura por ahora).</p>` + (Object.entries(g).sort(([a], [b]) => a.localeCompare(b)).map(([n, xs]) =>
     `<details class="card"><summary><span>${esc(n)}</span><span>${xs.reduce((t, x) => t + x.quantity, 0)} u.</span></summary>` +
-    xs.map(x => `<span class="sz ${x.quantity < 0 ? "sn" : x.quantity === 0 ? "s0" : x.quantity <= 3 ? "s3" : ""}"><span class="sw" style="width:12px;height:12px;background:${/^#[0-9A-Fa-f]{6}$/.test(x.color_hex || "") ? x.color_hex : "#888"}"></span> ${esc(x.color_name || "")} ${esc(x.size || "")}: ${x.quantity}</span>`).join("") + "</details>").join("") || "<p class='mut'>El almacén está vacío.</p>");
+    xs.map(x => `<span class="sz ${x.quantity < 0 ? "sn" : x.quantity === 0 ? "s0" : x.quantity <= 3 ? "s3" : ""}"><span class="t" title="Color y talla"><span class="sw" style="width:14px;height:14px;background:${/^#[0-9A-Fa-f]{6}$/.test(x.color_hex || "") ? x.color_hex : "#888"}"></span>${esc(x.color_name || "")} ${esc(x.size || "")}</span><span class="q" title="Cantidad">${x.quantity}<small>u.</small></span></span>`).join("") + "</details>").join("") || "<p class='mut'>El almacén está vacío.</p>");
 }
 
 const R = {d: new Date(Date.now() - 6 * 864e5).toLocaleDateString("sv"), h: new Date().toLocaleDateString("sv")};
@@ -525,8 +529,8 @@ async function verVenta(id) {
     modal(`<div class="tk">${ULT}</div><p><button class="p" data-pr="1">Imprimir copia</button> <span class="mut">Sale en la impresora que elijas (ticket de 80 mm o A4).</span></p>`);
   } catch (err) { alert("No se pudo abrir la venta: " + (err.message || err)); }
 }
-const filaMov = p => `<div class="row" data-store="${esc(p.store_id)}"><span class="n">${esc(p.name)} · ${esc(p.color_name || "sin color")} · ${esc(p.size || "—")}
-  <span class="mut">(${esc(storeName(p.store_id))}, stock ${p.stock})</span></span>
+const filaMov = p => `<div class="row" data-store="${esc(p.store_id)}"><span class="n">${esc(p.name)} · ${esc(p.color_name || "sin color")}
+  <span class="sz"><span class="t" title="Talla">${esc(p.size || "—")}</span><span class="q" title="Stock actual">${p.stock}<small>u.</small></span></span> <span class="mut">${esc(storeName(p.store_id))}</span></span>
   <select><option value="ENTRADA">Entrada</option><option value="SALIDA">Salida</option><option value="AJUSTE">Ajuste</option></select>
   <input type="number" step="1" placeholder="Cantidad" style="width:100px"><input type="text" placeholder="Motivo (opcional)" style="width:150px">
   <button class="p" data-reg="${esc(p.id)}">Registrar</button></div>`;
