@@ -32,6 +32,25 @@ details.card{margin-bottom:10px}summary{cursor:pointer;display:flex;justify-cont
 #login{max-width:340px;margin:12vh auto;display:grid;gap:10px;padding:0 20px}
 .err{color:var(--rojo)}.ok{color:var(--verde)}.hide{display:none!important}
 .x{overflow-x:auto}
+
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:10px 20px}
+header h1{font-size:17px;font-weight:700}
+.scan{flex:2;max-width:380px}.scan input{width:100%}
+.shell{display:flex;min-height:calc(100vh - 58px)}
+.tabs{flex-direction:column;width:210px;flex:none;margin:0;border-bottom:0;border-right:1px solid var(--line);padding:12px 8px;gap:2px;position:sticky;top:58px;align-self:flex-start;height:calc(100vh - 58px);overflow:auto}
+.tab{text-align:left;width:100%;border:0;border-left:3px solid transparent;border-radius:8px;padding:10px 12px}
+.tab.on{background:var(--card);border-color:var(--rosa)}
+main{flex:1;max-width:1300px;margin:0;padding:18px 28px 60px;min-width:0}
+.grid{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+tr[data-vd]:hover td{background:#2a2c33}
+hr{border:0;border-top:1px dashed #999;margin:6px 0}
+.modal{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:20;padding:16px}
+.modal .box{background:var(--bg);border:1px solid var(--line);border-radius:16px;max-width:620px;width:100%;max-height:90vh;overflow:auto;padding:18px}
+.tk{background:#fff;color:#000;padding:12px;font:12px/1.35 monospace;max-width:300px;margin:0 auto 12px}
+#ticket{display:none}
+@media(max-width:800px){.shell{display:block}.tabs{flex-direction:row;width:auto;height:auto;position:static;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line)}
+ .tab{white-space:nowrap;width:auto;border-left:0;border-bottom:3px solid transparent}.tab.on{background:none;border-color:var(--rosa)}main{padding:14px}}
+@media print{body>*{display:none!important}#ticket{display:block!important;color:#000;background:#fff;width:72mm;font:12px/1.35 monospace}@page{margin:3mm}}
 </style>
 </head>
 <body>
@@ -43,13 +62,11 @@ details.card{margin-bottom:10px}summary{cursor:pointer;display:flex;justify-cont
   <div id="msg" class="err"></div>
 </section>
 <div id="app" class="hide">
-  <header><h1 id="who">Panel</h1><span class="mut" id="upd"></span><button id="out">Salir</button></header>
-  <main>
-    <div class="chips" id="stores"></div>
-    <nav class="tabs" id="tabs"></nav>
-    <div id="view"></div>
-  </main>
+  <header><h1 id="who">Panel</h1><div class="scan"><input id="sc" placeholder="Escanear código de barras o SKU y Enter"></div><span class="mut" id="upd"></span><button id="out">Salir</button></header>
+  <div class="shell"><nav class="tabs" id="tabs"></nav>
+  <main><div class="chips" id="stores"></div><div id="view"></div></main></div>
 </div>
+<div id="ticket"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
 <script>
@@ -137,12 +154,12 @@ async function vVentas(v) {
   v.innerHTML = `<p><input type="date" id="fd" value="${S.date}"></p><div id="vl">Cargando…</div>`;
   $("fd").onchange = e => { S.date = e.target.value; render(); };
   const ini = new Date(S.date + "T00:00:00"), fin = new Date(ini.getTime() + 864e5);
-  const rows = await all("sales", "folio,store_id,sold_at,total,payment_method,receipt_type,status,origin",
+  const rows = await all("sales", "id,folio,store_id,sold_at,total,payment_method,receipt_type,status,origin",
     q => byStore(q).gte("sold_at", ini.toISOString()).lt("sold_at", fin.toISOString()).order("sold_at", {ascending: false}));
   const ok = rows.filter(r => r.status === "COMPLETADA");
-  $("vl").innerHTML = `<p class="mut">${ok.length} ventas · ${money(ok.reduce((t, r) => t + Number(r.total), 0))}</p>` +
+  $("vl").innerHTML = `<p class="mut">Toca una venta para ver el detalle e imprimir una copia. ${ok.length} ventas · ${money(ok.reduce((t, r) => t + Number(r.total), 0))}</p>` +
     (rows.length ? `<div class="x"><table><tr><th>Hora</th><th>Tienda</th><th>Comprobante</th><th>Pago</th><th class="r">Total</th></tr>` +
-    rows.map(r => `<tr><td>${new Date(r.sold_at).toLocaleTimeString("es-PE", {hour: "2-digit", minute: "2-digit"})}</td>
+    rows.map(r => `<tr data-vd="${esc(r.id)}" style="cursor:pointer"><td>${new Date(r.sold_at).toLocaleTimeString("es-PE", {hour: "2-digit", minute: "2-digit"})}</td>
       <td>${esc(storeName(r.store_id))}${r.origin === "ALMACEN" ? " (almacén)" : ""}</td>
       <td>${esc(r.receipt_type)} ${r.folio ?? ""}${r.status === "ANULADA" ? ' <span class="err">anulada</span>' : ""}</td>
       <td>${esc(r.payment_method)}</td><td class="r">${money(r.total)}</td></tr>`).join("") + "</table></div>"
@@ -330,7 +347,10 @@ async function vVendedores(v) {
 
 document.addEventListener("click", async e => {
   const t = e.target;
-  if (t.dataset.s) { S.store = t.dataset.s; pintarBase(); render(); }
+  if (t.dataset.x || t.classList.contains("modal")) cerrarModal();
+  else if (t.dataset.pr) { $("ticket").innerHTML = ULT; window.print(); }
+  else if (t.closest("[data-vd]")) verVenta(t.closest("[data-vd]").dataset.vd);
+  else if (t.dataset.s) { S.store = t.dataset.s; pintarBase(); render(); }
   else if (t.dataset.t) { S.tab = t.dataset.t; pintarBase(); render(); }
   else if (t.dataset.save) {
     const k = t.dataset.save, hx = valorFila(t.parentElement);
@@ -346,7 +366,7 @@ document.addEventListener("click", async e => {
     const {error: e2} = await sb.from("inventory_movements").insert({id: mid, store_id: row.dataset.store, product_id: id, movement_type: tipo, quantity: Math.abs(delta),
       stock_before: after - delta, stock_after: after, reason: row.querySelector("input[type=text]").value || "Registrado desde el panel web", moved_at: new Date().toISOString()});
     alert("Stock actualizado: ahora hay " + after + (e2 ? ". Aviso: no se guardó la línea del historial (" + e2.message + ")." : "."));
-    render();
+    cerrarModal(); render();
   } else if (t.dataset.dd) {
     if (!confirm("¿Eliminar este descuento?")) return;
     const {error} = await sb.from("discounts").update({deleted: true}).eq("id", t.dataset.dd);
@@ -382,6 +402,61 @@ async function subirFoto(id, file) {
   const url = sb.storage.from("catalog-photos").getPublicUrl(ruta).data.publicUrl;
   const {error} = await sb.from("products").update({photo_url: url}).eq("id", id); if (error) throw error;
 }
+function modal(html) {
+  cerrarModal(); const m = document.createElement("div"); m.className = "modal"; m.id = "md";
+  m.innerHTML = `<div class="box">${html}<p style="text-align:right"><button data-x="1">Cerrar</button></p></div>`; document.body.appendChild(m);
+}
+const cerrarModal = () => { const m = $("md"); if (m) m.remove(); };
+document.addEventListener("keydown", e => { if (e.key === "Escape") cerrarModal(); });
+
+const TIPO = {BOLETA: "Boleta de venta", FACTURA: "Factura", NOTA_VENTA: "Nota de venta"};
+let ULT = "";
+function htmlTicket(v, it, c) {
+  const L = (a, b) => `<div style="display:flex;justify-content:space-between;gap:8px"><span>${a}</span><span>${b}</span></div>`;
+  return `<div style="text-align:center"><b>${esc(c.store_name || storeName(v.store_id))}</b>${c.slogan ? "<br>" + esc(c.slogan) : ""}${c.tax_id ? "<br>RUC " + esc(c.tax_id) : ""}${c.address ? "<br>" + esc(c.address) : ""}${c.phone ? "<br>Tel. " + esc(c.phone) : ""}
+    <br><b>*** COPIA ***</b><br>${esc(TIPO[v.receipt_type] || v.receipt_type)} ${esc(v.folio ?? "")}${v.status === "ANULADA" ? "<br><b>ANULADA</b>" : ""}</div><hr>
+    ${new Date(v.sold_at).toLocaleString("es-PE")}${v.customer_name ? "<br>Cliente: " + esc(v.customer_name) : ""}<hr>` +
+    it.map(x => `${esc(x.product_name)}` + L(`${x.quantity} x ${money(x.unit_price)}`, money(x.subtotal))).join("") + "<hr>" +
+    (Number(v.discount) > 0 ? L("Descuento" + (v.discount_label ? " (" + esc(v.discount_label) + ")" : ""), "-" + money(v.discount)) : "") +
+    `<b>${L("TOTAL", money(v.total))}</b>${L("Pago", esc(v.payment_method))}` +
+    (v.amount_received != null ? L("Recibido", money(v.amount_received)) + L("Vuelto", money(v.change_amount)) : "") +
+    `<hr><div style="text-align:center">${esc(c.footer || "")}${c.exchange_policy ? "<br>" + esc(c.exchange_policy) : ""}</div>`;
+}
+async function verVenta(id) {
+  try {
+    const {data: v, error} = await sb.from("sales").select("*").eq("id", id).single(); if (error) throw error;
+    const [a, b] = await Promise.all([sb.from("sale_items").select("product_name,quantity,unit_price,subtotal").eq("sale_id", id),
+      sb.from("store_settings").select("*").eq("store_id", v.store_id).maybeSingle()]);
+    ULT = htmlTicket(v, a.data || [], b.data || {});
+    modal(`<div class="tk">${ULT}</div><p><button class="p" data-pr="1">Imprimir copia</button> <span class="mut">Sale en la impresora que elijas (ticket de 80 mm o A4).</span></p>`);
+  } catch (err) { alert("No se pudo abrir la venta: " + (err.message || err)); }
+}
+const filaMov = p => `<div class="row" data-store="${esc(p.store_id)}"><span class="n">${esc(p.name)} · ${esc(p.color_name || "sin color")} · ${esc(p.size || "—")}
+  <span class="mut">(${esc(storeName(p.store_id))}, stock ${p.stock})</span></span>
+  <select><option value="ENTRADA">Entrada</option><option value="SALIDA">Salida</option><option value="AJUSTE">Ajuste</option></select>
+  <input type="number" step="1" placeholder="Cantidad" style="width:100px"><input type="text" placeholder="Motivo (opcional)" style="width:150px">
+  <button class="p" data-reg="${esc(p.id)}">Registrar</button></div>`;
+async function escanear(code) {
+  code = String(code || "").trim();
+  if (!/^[A-Za-z0-9._\-]{3,64}$/.test(code)) { alert("Código no válido: " + code); return; }
+  const {data, error} = await sb.from("products").select("id,store_id,name,size,color_name,stock,base_product_id,active,deleted").or(`barcode.eq.${code},sku.eq.${code}`);
+  if (error) { alert("No se pudo buscar: " + error.message); return; }
+  let r = (data || []).filter(p => p.active && !p.deleted); const h = r.filter(p => p.base_product_id); if (h.length) r = h;
+  if (S.store !== "all") r = r.filter(p => p.store_id === S.store);
+  modal(r.length ? `<h3 style="margin-top:0">Código ${esc(code)}</h3>` + r.map(filaMov).join("") : `<p>No hay ningún producto con el código <b>${esc(code)}</b>${S.store === "all" ? "" : " en esta tienda"}.</p>`);
+}
+// Lector de código de barras (USB o Bluetooth en modo teclado): escribe muy rápido y termina con Enter.
+let bufEsc = "", tEsc = 0;
+document.addEventListener("keydown", e => {
+  if ($("app").classList.contains("hide") || e.ctrlKey || e.altKey || e.metaKey) return;
+  const el = document.activeElement;
+  if (el && el.id === "sc") { if (e.key === "Enter") { e.preventDefault(); const c = el.value; el.value = ""; escanear(c); } return; }
+  if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+  const now = Date.now(); if (now - tEsc > 80) bufEsc = ""; tEsc = now;
+  if (e.key === "Enter") { if (bufEsc.length >= 3) { e.preventDefault(); const c = bufEsc; bufEsc = ""; escanear(c); } bufEsc = ""; }
+  else if (e.key.length === 1) bufEsc += e.key;
+});
+
 document.addEventListener("change", async e => {
   const t = e.target;
   if (t.dataset.est) ajustarFila(t.closest(".row"));
